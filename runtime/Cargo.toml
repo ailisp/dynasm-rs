@@ -18,3 +18,5 @@ license = "MPL-2.0"
 memmap2 = "^0.2"
 byteorder = "1"
 dynasm = { version = "=1.1.0", path = "../plugin" }
+tracing = { version = "0.1", default-features = false, features = ["log"] }
+tracing-subscriber = { version = "0.2", default-features = false, features = ["env-filter", "fmt"] }
