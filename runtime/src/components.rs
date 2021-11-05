@@ -28,6 +28,8 @@ pub struct MemoryManager {
 impl MemoryManager {
     /// Create a new memory manager, with `initial_mmap_size` data allocated
     pub fn new(initial_mmap_size: usize) -> io::Result<Self> {
+        let _span = tracing::debug_span!(target: "vm", "new").entered();
+
         let execbuffer = ExecutableBuffer::new(initial_mmap_size)?;
         let execbuffer_addr = execbuffer.as_ptr() as usize;
 
