@@ -37,11 +37,11 @@ use crate::relocations::Relocation;
 
 use std::hash::Hash;
 use std::iter::Extend;
-use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::io;
 use std::error;
 use std::fmt::{self, Debug};
 use std::mem;
+use crate::mmap::MutableBuffer;
 
 /// This macro takes a *const pointer from the source operand, and then casts it to the desired return type.
 /// this allows it to be used as an easy shorthand for passing pointers as dynasm immediate arguments.
@@ -71,27 +71,6 @@ impl DynamicLabel {
     /// Get the internal ID of this dynamic label. This is only useful for debugging purposes.
     pub fn get_id(self) -> usize {
         self.0
-    }
-}
-
-
-/// A read-only shared reference to the executable buffer inside an Assembler. By
-/// locking it the internal `ExecutableBuffer` can be accessed and executed.
-#[derive(Debug, Clone)]
-pub struct Executor {
-    execbuffer: Arc<RwLock<ExecutableBuffer>>
-}
-
-/// A read-only lockable reference to the internal `ExecutableBuffer` of an Assembler.
-/// To gain access to this buffer, it must be locked.
-impl Executor {
-    /// Gain read-access to the internal `ExecutableBuffer`. While the returned guard
-    /// is alive, it can be used to read and execute from the `ExecutableBuffer`.
-    /// Any pointers created to the `Executablebuffer` should no longer be used when
-    /// the guard is dropped.
-    #[inline]
-    pub fn lock(&self) -> RwLockReadGuard<ExecutableBuffer> {
-        self.execbuffer.read().unwrap()
     }
 }
 
@@ -565,8 +544,7 @@ impl<R: Relocation> Assembler<R> {
 
         // swap out a buffer from base
         let mut lock = self.memory.write();
-        let buffer = mem::replace(&mut *lock, ExecutableBuffer::default());
-        let mut buffer = buffer.make_mut().expect("Could not swap buffer protection modes");
+        let mut buffer = mem::replace(&mut *lock, MutableBuffer::default());
 
         // construct the modifier
         let mut modifier = Modifier {
@@ -588,8 +566,6 @@ impl<R: Relocation> Assembler<R> {
         // flush any changes made by the user code to the buffer
         modifier.encode_relocs()?;
 
-        // repack the buffer
-        let buffer = buffer.make_exec().expect("Could not swap buffer protection modes");
         *lock = buffer;
 
         // call it a day
@@ -631,13 +607,6 @@ impl<R: Relocation> Assembler<R> {
                 memory,
                 ..self
             })
-        }
-    }
-
-    /// Create an executor which can be used to execute code while still assembling code
-    pub fn reader(&self) -> Executor {
-        Executor {
-            execbuffer: self.memory.reader()
         }
     }
 
