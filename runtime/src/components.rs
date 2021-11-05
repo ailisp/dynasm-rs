@@ -14,7 +14,7 @@ use crate::{AssemblyOffset, DynamicLabel, DynasmError, DynasmLabelApi, LabelKind
 #[derive(Debug)]
 pub struct MemoryManager {
     // buffer where the end result is copied into
-    execbuffer: Arc<RwLock<ExecutableBuffer>>,
+    execbuffer: Arc<RwLock<MutableBuffer>>,
 
     // size of the allocated mmap (so we don't have to go through RwLock to get it)
     execbuffer_size: usize,
@@ -28,9 +28,9 @@ pub struct MemoryManager {
 impl MemoryManager {
     /// Create a new memory manager, with `initial_mmap_size` data allocated
     pub fn new(initial_mmap_size: usize) -> io::Result<Self> {
-        let _span = tracing::debug_span!(target: "vm", "new").entered();
+        let _span = tracing::debug_span!(target: "vm", "new MemoryManager").entered();
 
-        let execbuffer = ExecutableBuffer::new(initial_mmap_size)?;
+        let execbuffer = MutableBuffer::new(initial_mmap_size)?;
         let execbuffer_addr = execbuffer.as_ptr() as usize;
 
         Ok(MemoryManager {
@@ -89,29 +89,19 @@ impl MemoryManager {
 
             // swap the buffers
             self.execbuffer_addr = new_buffer_addr;
-            *self.execbuffer.write().unwrap() = new_buffer
-                .make_exec()
-                .expect("Could not swap buffer protection modes")
+            *self.execbuffer.write().unwrap() = new_buffer;
         } else {
             // println!("{}", new.len());
 
             let _span = tracing::debug_span!(target: "vm", "else").entered();
 
-            // temporarily change the buffer protection modes and copy in new data
             let mut lock = self.write();
-            let buffer = mem::replace(&mut *lock, ExecutableBuffer::default());
-            let mut buffer = buffer
-                .make_mut()
-                .expect("Could not swap buffer protection modes");
+            let mut buffer = mem::replace(&mut *lock, MutableBuffer::default());
 
             // update buffer and length
             buffer.set_len(new_asmoffset);
             buffer[old_asmoffset..].copy_from_slice(&new);
 
-            // repack the buffer
-            let buffer = buffer
-                .make_exec()
-                .expect("Could not swap buffer protection modes");
             *lock = buffer;
         }
 
@@ -120,24 +110,20 @@ impl MemoryManager {
     }
 
     /// Borrow the internal memory buffer mutably
-    pub fn write(&self) -> RwLockWriteGuard<ExecutableBuffer> {
+    pub fn write(&self) -> RwLockWriteGuard<MutableBuffer> {
         self.execbuffer.write().unwrap()
     }
 
     /// finalizes the currently committed part of the buffer.
     pub fn finalize(self) -> Result<ExecutableBuffer, Self> {
         match Arc::try_unwrap(self.execbuffer) {
-            Ok(execbuffer) => Ok(execbuffer.into_inner().unwrap()),
+            Ok(execbuffer) => Ok(execbuffer.into_inner().unwrap().make_exec()
+                .expect("Could not swap buffer protection modes")),
             Err(arc) => Err(Self {
                 execbuffer: arc,
                 ..self
             }),
         }
-    }
-
-    /// Create an atomically refcounted reference to the internal executable buffer
-    pub fn reader(&self) -> Arc<RwLock<ExecutableBuffer>> {
-        self.execbuffer.clone()
     }
 }
 
